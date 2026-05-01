@@ -1,26 +1,18 @@
 """
-High School Management System API
+Pytest configuration and fixtures for FastAPI activity management system tests.
 
-A super simple FastAPI application that allows students to view and sign up
-for extracurricular activities at Mergington High School.
+Provides:
+- client: TestClient fixture for making HTTP requests to the app
+- reset_activities: Fixture that resets the in-memory activities database to initial state
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-import os
-from pathlib import Path
+import pytest
+from fastapi.testclient import TestClient
+from src.app import app, activities
 
-app = FastAPI(title="Mergington High School API",
-              description="API for viewing and signing up for extracurricular activities")
 
-# Mount the static files directory
-current_dir = Path(__file__).parent
-app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
-          "static")), name="static")
-
-# In-memory activity database
-activities = {
+# Store the initial state of activities when the test module is loaded
+INITIAL_ACTIVITIES = {
     "Chess Club": {
         "description": "Learn strategies and compete in chess tournaments",
         "schedule": "Fridays, 3:30 PM - 5:00 PM",
@@ -78,46 +70,43 @@ activities = {
 }
 
 
-@app.get("/")
-def root():
-    return RedirectResponse(url="/static/index.html")
+@pytest.fixture
+def reset_activities():
+    """
+    Fixture that resets the activities database to its initial state.
+    
+    Runs before each test to ensure a clean state and no test interference.
+    """
+    # Clear and repopulate with initial data
+    activities.clear()
+    activities.update({
+        key: {
+            'description': value['description'],
+            'schedule': value['schedule'],
+            'max_participants': value['max_participants'],
+            'participants': value['participants'].copy()
+        }
+        for key, value in INITIAL_ACTIVITIES.items()
+    })
+    yield
+    # Cleanup after test (optional, but good practice)
+    activities.clear()
+    activities.update({
+        key: {
+            'description': value['description'],
+            'schedule': value['schedule'],
+            'max_participants': value['max_participants'],
+            'participants': value['participants'].copy()
+        }
+        for key, value in INITIAL_ACTIVITIES.items()
+    })
 
 
-@app.get("/activities")
-def get_activities():
-    return activities
-
-
-@app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
-    # Validate activity exists
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    # Get the specific activity
-    activity = activities[activity_name]
-
-    # Validate student is not already signed up
-    if email in activity["participants"]:
-        raise HTTPException(status_code=400, detail="Student already signed up")
-
-    # Add student
-    activity["participants"].append(email)
-    return {"message": f"Signed up {email} for {activity_name}"}
-
-
-@app.delete("/activities/{activity_name}/participants")
-def remove_participant(activity_name: str, email: str):
-    """Remove a student from an activity"""
-    # Validate activity exists
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    activity = activities[activity_name]
-
-    if email not in activity["participants"]:
-        raise HTTPException(status_code=400, detail="Student not registered for this activity")
-
-    activity["participants"].remove(email)
-    return {"message": f"Removed {email} from {activity_name}"}
+@pytest.fixture
+def client(reset_activities):
+    """
+    Fixture that provides a TestClient for making HTTP requests to the FastAPI app.
+    
+    Depends on reset_activities fixture to ensure app state is fresh for each test.
+    """
+    return TestClient(app)
